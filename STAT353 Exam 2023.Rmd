@@ -1,0 +1,230 @@
+---
+title: 'Final Exam'
+subtitle: "STAT 353"
+author: "Shuo Han" #change to your name
+date: ''
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+editor_options: 
+  markdown: 
+    wrap: 72
+urlcolor: blue
+linkcolor: red
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(readr)
+library(pscl)
+library(MASS)
+library(car)
+
+#read in the data
+data <- read_csv("SSOCS(2017-2018)Data.csv")
+#names(data)[181:200]
+```
+
+# An Overview of the Problem
+
+In the United States, gun violence in K-12 schools has grown rapidly over the past two decades. For example, the mass shooting at Uvalde Elementary in Texas (2022) received a large degree of media attention. While the scale of this event was extreme, however, gun violence of smaller scales is more [common](https://news.google.com/search?q=gun%20school&hl=en-US&gl=US&ceid=US%3Aen) .
+
+As gun violence increases, researchers and policymakers continue to search for solutions. These include ideas like increasing monitoring of social and mental health of students, using metal detectors, stationing police in schools, among others. This question - What can we do to reduce gun violence? - provides the background for this exam.
+
+## The SSOCS Data
+
+"The School Survey on Crime and Safety (SSOCS) — a nationally representative survey of U.S. K–12 public schools — is managed by the National Center for Education Statistics (NCES), an agency within the U.S. Department of Education’s Institute of Education Sciences. SSOCS collects detailed information from public schools on the incidence, frequency, seriousness, and nature of violence affecting students and school personnel. SSOCS also collects information on the programs, practices, and policies that schools have in place to prevent and reduce crime. Data from this collection can be used to examine the relationship between school characteristics and violent crimes in regular public primary, middle, high, and combined schools."
+
+All of the information that you need to understand this data is provided. This includes:
+
+ * `SSOCS(2017-2018)Data.csv` : The data
+ * `ssocs codebook.pdf` : The code book
+
+Notice that in the code book, the `Appendix A` includes the actual survey and that `Appendix B` includes a list of all the variable names and definitions. Further information on the creation of composite variables (those ending in "18") can be found in `Chapter 5`.
+
+(Throughout, pay particular attention to data with values of "-1". These are purposeful skips and in many (but not all) cases may need to be re-coded to "0".)
+
+## This Exam 
+
+The purpose of this exam is to test your ability to put to use all that you have learned in STAT 353 in the context of real data, with a real question. This involves combining your understanding of regression concepts and theory with the implementation of these in code and clear interpretation to a lay audience. Be sure to convey what the results tell you, what assumptions they require, and any limitations in your results. 
+
+For this exam, we will focus in particular on two outcomes:
+
+  - `INCID18` : total incidents of any crime
+  - `DISFIRE18` : total use of firearm or explosive
+
+To simply the analysis, you can ignore the sampling weights / jackknife replicates.
+  
+**Finally, a strong exam is one that is judicious in what is presented (you can put materials in an Appendix), that explains the decisions and assumptions that were made and why, that explains the how the results should be interpreted, and that is clear in any limitations.**
+
+
+# Part I. Testing Hypotheses
+
+As stated above, researchers and policymakers have hypothesized and enacted a variety of policies meant to reduce crimes and gun violence in schools. In particular, they often argue that schools should include *security guards* in order to reduce crime and gun violence.
+
+For this part, answer the following questions:
+
+1. After exploring the two outcomes (`INCID18` and `DISFIRE18`) determine what type of regression model is appropriate for each (e.g., OLS). Explain which is best and why.
+```{r hypothesis1}
+summary(data$INCID18)
+summary(data$DISFIRE18)
+
+data$DISFIRE18 <- ifelse(data$DISFIRE18 < 0, 0, data$DISFIRE18)
+summary(data$DISFIRE18)
+
+with(data, hist(data$INCID18))
+with(data, hist(data$DISFIRE18))
+```
+
+The minimum value of DISFIRE18 is -1, which is unusual, since with actual meaning of DISFIRE18, total use of firearm or explosive should always be positive. Thus, I will replace negative values with 0. However, the value of INCID18, total incidents of any crime, has a minimum value of 0, so it fits the actual case.
+Furthermore, I plot a histogram for the data, the DISFIRE18 and INCID18 seems to be negatively correlated and heavily right-skewed, and the data does not looks normal and are some count values, so a Poisson regression model may fits better for DISFIRE18 and INCID18, which are usually used for count data as in lecture3.1. I just start with Poisson regression as base case, which requires dispersion parameter equal to one with equal mean and variance, and check the actual parameter address overdispersion problem by using NB regression metioned in lecture3.1 if exist.
+
+2. Are the presence of *security guards* (`SEC_FT18` and `SEC_PT18`)  associated with reductions in crime (`INCID18`) and gun violence (`DISFIRE18`)? Interpret the effects clearly in language that a non-statistician could understand. 
+
+```{r hypothesis2}
+# INCID18 ~ SEC_FT18 + SEC_PT18
+model1 <- glm(INCID18 ~ SEC_FT18 + SEC_PT18, data = data, family = "poisson")
+phi1 <- sum(model1$deviance) / model1$df.resid
+phi1
+
+model12 <- glm.nb(INCID18 ~ SEC_FT18 + SEC_PT18, data = data)
+par(mfrow=c(2,3))
+plot(model12)
+influenceIndexPlot(model12, var=c('cook', 'hat'))
+update(model12, subset =-c(1127,1503))
+summary(model12)
+
+# DISFIRE18 ~ SEC_FT18 + SEC_PT18
+model2 <- glm(DISFIRE18 ~ SEC_FT18 + SEC_PT18, data = data, family = "poisson")
+phi2 <- sum(model2$deviance) / model2$df.resid
+phi2
+
+plot(model2)
+influenceIndexPlot(model2, var=c('cook', 'hat'))
+summary(model2)
+```
+Since the dispersion parameter of the model for INCID18 is 37.12, which is far larger than 1, so we can detect overdispersion here, so we can use negative binomial distribution here; the dispersion parameter of the model model for DISFIRE18 is 0.7907, which is smaller than 1, so we can detect a weak underdispersion here, no overdispersion, so I keep using the poisson distribution here.
+After checking the cook's distance and hat values of these two models, it seems that there are two outliers point 1127 and 1503 in the first model for INCID18, but there seems to be no outlier in the second model conbining cook's distance and hat values. Thus, I remove the outliers in the first model and fit the new model.
+
+In the first model for INCID18, we can see that the presence of full-time security guards (SEC_FT18) and part-time security guards (SEC_PT18) are both statistically significant with p-values less than 0.05; also in the second model fot DISFIRE18. Thus, we can conclude that the presence of full-time security guards (SEC_FT18) and part-time security guards (SEC_PT18) are both associated with reductions in crime (`INCID18`) and gun violence (`DISFIRE18`). Thus obviously, the presence of security guards (`SEC_FT18` and `SEC_PT18`) are associated with reductions in crime (`INCID18`) and gun violence (`DISFIRE18`).
+
+According to the model summary of the first model for INCID18, the intercept 3.06984 indicates the expected log count when both full-time security guards SEC_FT18 and part-time security guards SEC_PT18 are zero. For SEC_FT18, the coefficient is 0.12314，which indicates that for each unit increase in full-time security guards SEC_FT18, the expected log count increases by 0.12314, holding all other variables constant. For SEC_PT18, the coefficient is 0.03197, which indicates that for each unit increase in full-time security guards SEC_PT18, the expected log count increases by 0.03197, holding all other variables constant. 
+
+According to the model summary of the first model for INCID18, the intercept -2.27808 indicates the expected log count of DISFIRE18 when both full-time security guards SEC_FT18 and part-time security guards SEC_PT18 are zero. The coefficient estimate for SEC_FT18 is 0.02105, which indicates for every unit increase in SEC_FT18, there is an estimated 2.1% increase in the expected log count of DISFIRE18 holding SEC_PT18 constant. The coefficient estimate for SEC_PT18 is -0.13521, which indicates for every unit increase in SEC_PT18, there is an estimated 13.5% decrease in the expected log count of DISFIRE18 holding SEC_FT18 constant. 
+
+3. To what extent do these effects differ in urban schools versus non-urban schools?
+
+```{r hypothesis3}
+datay = data[data$FR_URBAN==1,]
+datan = data[data$FR_URBAN!=1,]
+
+# INCID18 ~ SEC_FT18 + SEC_PT18
+modely1<- glm(INCID18 ~ SEC_FT18 + SEC_PT18, data = datay, family = "poisson")
+phiy1 <- sum(modely1$deviance) / modely1$df.resid
+phiy1
+
+modeln1 <- glm(INCID18 ~ SEC_FT18 + SEC_PT18, data = datan, family = "poisson")
+phin1 <- sum(modeln1$deviance) / modeln1$df.resid
+phin1
+
+modely12 = glm.nb(INCID18 ~ SEC_FT18 + SEC_PT18, data = datay)
+influenceIndexPlot(modely12, var=c('cook', 'hat'))
+modeln12 = glm.nb(INCID18 ~ SEC_FT18 + SEC_PT18, data = datan)
+influenceIndexPlot(modeln12, var=c('cook', 'hat'))
+compareCoefs(modely12,modeln12)
+
+# DISFIRE18 ~ SEC_FT18 + SEC_PT18
+modely2 <- glm(DISFIRE18 ~ SEC_FT18 + SEC_PT18, data = datay, family = "poisson")
+phiy2 <- sum(modely2$deviance) / modely2$df.resid
+phiy2
+influenceIndexPlot(modely2, var=c('cook', 'hat'))
+update(model12, subset =-c(197,335))
+
+modeln2 <- glm(DISFIRE18 ~ SEC_FT18 + SEC_PT18, data = datan, family = "poisson")
+phin2 <- sum(modeln2$deviance) / modeln2$df.resid
+phin2
+influenceIndexPlot(modeln2, var=c('cook', 'hat'))
+compareCoefs(modely2,modeln2)
+```
+
+For INCID18, the coefficient for SEC_FT18 in the model for INCID18 of urban schools is 0.08389, while the coefficient for SEC_FT18 in the model for INCID18 of non-urban schools is 0.13225. This suggests that the effect of SEC_FT18 on INCID18 is stronger in non-urban schools than in urban schools.
+The coefficient for SEC_PT18 in the model for INCID18 of urban schools is 0.00725, while the coefficient for SEC_PT18 in the model for INCID18 of non-urban schools is 0.04426. This suggests that the effect of SEC_PT18 on INCID18 is also stronger in non-urban schools than in urban schools.
+
+For DISFIRE18, the coefficient for SEC_FT18 in the model for DISFIRE18 of urban schools is 0.0235, while the coefficient for SEC_FT18 in the model for DISFIRE18 of non-urban schools is 0.0220. This suggests that the effect of SEC_FT18 on DISFIRE18 is slightly weaker in non-urban schools than in urban schools, although the difference is small.
+The coefficient for SEC_PT18 in the model for DISFIRE18 of urban schools is 0.0621, while the coefficient for SEC_FT18 in the model for DISFIRE18 of non-urban schools is -0.3334. This suggests that the effect of SEC_PT18 on DISFIRE18 is also stronger in non-urban schools than in urban schools in absolute value. The effect of the urban schools is positive, but negative for non-urban schools.
+
+4.  Do your analyses suggest that policymakers are correct that security guards reduce crime and gun violence? If so, explain why. If not, conduct additional analyses (using regression) that allow you to evaluate their claim and interpret your results. 
+
+```{r hypothesis4}
+summary(model12)
+summary(model2)
+```
+
+
+# Part II. Predicting Crime
+
+Other researchers and policymakers would like to develop a model to predict crime (`INCID18`) based upon observable school characteristics. Their idea is that they could first predict schools that have a lot of crime and then put in place interventions that could reduce such crime. 
+
+For this part, perform the following tasks. 
+
+1. For your first model, use variables `C0532`, `C0534`, `C0536`, `C0538`, `C0560`, `C0562`, `C0568`, `FR_LVEL`, `FR_URBAN`, and `FR_SIZE` as predictor variables. Be sure to pay attention to non-linearities and interactions. (In addition to Appendix B, you can find more detailed explanation for the variables `C0532` to `C0568` on pages 80-81 of the code book, and the three variables `FR_LVEL`, `FR_URBAN`, and `FR_SIZE` on page 172). How well does this model perform? 
+
+
+```{r predict1}
+x <- data[, c("C0532", "C0534", "C0536", "C0538", "C0560", "C0562", "C0568", "FR_LVEL", "FR_URBAN", "FR_SIZE")]
+summary(x)
+cor(x)
+
+model_full <- glm(INCID18 ~ C0532 + C0534 + C0536 + C0538 + C0560 + C0562 + C0568 + FR_LVEL + FR_URBAN + FR_SIZE + I(C0536*C0534) + I(C0562 * C0538), data = data, family = "poisson")
+phif <- sum(model_full$deviance) / model_full$df.resid
+phif
+
+model_first <- glm.nb(INCID18 ~ C0532 + C0534 + C0536 + C0538 + C0560 + C0562 + C0568 + FR_LVEL + FR_URBAN + FR_SIZE + I(C0536*C0534) + I(C0562 * C0538), data = data)
+summary(model_first)
+```
+First, I check the range of all data variables same as partI, and there are no values with negative data, so I use the original data set. Then, I check the correlation between all variables, and there are two worth-noticing correlation values greater than 0.5, C0534 vs. C0536, and C0538 vs. C0562. Thus, I fit the full model with all variables and these two interaction terms by the count model poisson regression as in part I. I check the the dispersion parameter of the model for INCID18 is 26.02621, which is far larger than 1, so we can detect great overdispersion here, so I use negative binomial distribution here for a updated model.
+Then I check the model summary, all the p-values of all variables except C0536, C0562, and C0568, are less than 0.05, so these variables except these are statistically significant. And I will delete these not significant variables and fit a further model in question2.
+
+2. Create a new model that includes only those covariates that were statistically significant in (1), further refining this until all covariates in this model are statistically significant. How well does this model perform relative to Model (1)?
+
+```{r predict2}
+model_new <- glm.nb(INCID18 ~ C0532 + C0534 + C0538 + C0560 + FR_LVEL + FR_URBAN + FR_SIZE + I(C0536 * C0534) + I(C0562 * C0538), data = data)
+summary(model_new)
+```
+
+I fit the new model required in the problem with variables C0532, C0534, C0538, C0560, FR_LVEL, FR_URBAN, FR_SIZE,  C0536 * C0534, and C0562 * C0538, that are statistically significant in the new model. And the new model is INCID18 ~ $\beta_0$+$\beta_1$C0532 + $\beta_2$C0534 + $\beta_3$C0538 + $\beta_4$C0560 + $\beta_5$FR_LVEL + $\beta_6$FR_URBAN + $\beta_7$FR_SIZE + $\beta_8$C0536 * C0534 + $\beta_9$C0562 * C0538 with all corresponding in the summary above. 
+
+The first model has 13 predictor variables, including main effects and interactions, while the new model has 9 predictor variables, including main effects and interactions. The second model has fewer predictor variables and does not include some of the interactions in the first model. So the second model is a better and simpler model than the first one. Both of these two models use the same dispersion parameter (theta) of around 0.877, indicating that they have a similar level of overdispersion.
+Comparing the AIC values of the two models, we see that the new model has an AIC of 22744, which is smaller than the AIC 22746 of the first model in 1, so the second model is a better fit for the data. However, the difference in AIC values between the two models is small, and the AIC value of the new model is still very large, indicating that there is still room for improvement in the model.
+
+3.  Develop and implement an approach to build the best model possible that predicts the total number of crimes (incidents, `INCID18`). (In addition to the variables mentioned in the previous problem, you may consider other variables, but be sure to explain your thinking.) 
+
+    What is your final model and why do you think it is the best?  Be sure to clearly explain your approach in language a non-statistician could understand.
+
+
+```{r predict3}
+model_better <- glm.nb(INCID18 ~ C0532 + C0534 + C0538 + C0560 + FR_LVEL + FR_URBAN + FR_SIZE + I(C0536 * C0534) + I(C0562 * C0538) + C0125 + C0129 + C0143 + C0146 + C0176 + C0177 + C0428, data = data)
+summary(model_better)
+
+model_best <- glm.nb(INCID18 ~ C0532 + C0534 + C0538 + C0560 + FR_LVEL + FR_URBAN + FR_SIZE + I(C0536 * C0534) + I(C0562 * C0538) + C0125 + C0143 + C0428, data = data)
+influenceIndexPlot(model_best, var=c('cook', 'hat'))
+# no influential point
+summary(model_best)
+```
+
+By looking at the codebook, I choose to add the variable Random sweeps for contraband C0125, Require drug testing for students in extra-curricular activities C0129, Provide a structured anonymous threat reporting system C0143, Security camera(s) monitor the school C0146, Behavioral modification for students C0176, Student court to address student conduct problems or minor offenses C0177, and In-school disciplinary program available - action used C0428, since I think these school characteristics may be more correlated with total incidents of any crime obviously. In the summary of the new model, we can see that among these added variables, only C0125, C0143, and C0428 have p-values less than 0.05, so only these three added variables looks statistically significant. So I kept those statistically significant variables and fit the final best model. Also, I have checked the outliers with a combination of cook's distance and hat values, it seems that there are no outliers to remove.
+We can see that the final has the lowest AIC, indicating that it is the best fit among the three models. Also, compared to these model in question2, we can see that there are more variables in the best model and all has p-values less than 0.05 and statistically significant, so it is the most informative model. Thus, we can conclude that best model fitted in question3 is the best fit for the data and provides the most informative set of predictors for the response variable.
+The intercept 1.642 represents the expected log of the dependent variable when all independent variables are equal to zero. The coefficient of C0532, 0.007541 represents the expected change in the log of the dependent variable for a one-unit increase in C0532, holding all other variables constant. The coefficient of C0534, 0.007943 represents the expected change in the log of the dependent variable for a one-unit increase in C0534, holding all other variables constant. The coefficient of C0538, 0.1796 represents the expected change in the log of the dependent variable for a one-unit increase in C0538, holding all other variables constant. The coefficient of C0560, -0.07955 represents the expected change in the log of the dependent variable for a one-unit increase in C0560, holding all other variables constant. The coefficient of FR_LVEL, 0.1576 represents the expected change in the log of the dependent variable for a one-unit increase in FR_LVEL, holding all other variables constant. The coefficient of FR_URBAN, -0.09571 represents the expected change in the log of the dependent variable for a one-unit increase in FR_URBAN, holding all other variables constant. The coefficient of FR_SIZE, 0.5412 represents the expected change in the log of the dependent variable for a one-unit increase in FR_SIZE, holding all other variables constant. The coefficient of the interaction term I(C0536 * C0534), -0.0001464 represents the expected change in the log of the dependent variable for a one-unit increase in the product of C0536 and C0534, holding all other variables constant. The coefficient of the interaction term I(C0562 * C0538), -0.04039 represents the expected change in the log of the dependent variable for a one-unit increase in the product of C0562 and C0538, holding all other variables constant. The coefficient of C0125, -0.1495 represents the expected change in the log of the dependent variable for a one-unit increase in C0125, holding all other variables constant. The coefficient of C0143, -0.1192 represents the expected change in the log of the dependent variable for a one-unit increase in C0143, holding all other variables constant. The coefficient of C0428, 0.1151 represents the expected change in the log of the dependent variable for a one-unit increase in C0428, holding all other variables constant.
+
+4. Does your final model do a good job in predicting crime? Explain to a policymaker if and how they should properly use this model. 
+```{r}
+RMSE <- sqrt(mean((model_best$fitted.values-data$INCID18)^2))
+RMSE
+```
+
+We can see that the final has the lowest AIC, indicating that it is the best fit among the three models. It has a relatively small RMSE 35.63647, so the model looks a good fit for this model. Also, compared to these model in question2, we can see that there are more variables in the best model and all has p-values less than 0.05 and statistically significant, so it is the most informative model. Thus, we can conclude that best model fitted in question3 is the best fit for the data and provides the most informative set of predictors for the response variable.
+The final model seems to be performing reasonably well in predicting crime, as indicated by the relatively low residual deviance, low RMSE and statistically significant coefficients for all predictor variables. 
+However, policymakers should know that predicting crime is a complex thing, and there are likely other factors beyond those included in the model that could influence crime rates. If policymakers want to use this model, they should know that it is based on previous data and may not accurately predict future crime rates if conditions change. Moreover, the model should not be the only support to make policy decisions related to crime. Policymakers should also consider other factors outside of schools or other factors not observed here. Also, policymakers should acknowledge that criminal justice policy can have multifaceted and far-reaching effects, and they should work to mitigate any unintended consequences of their decisions.
+
