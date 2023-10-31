@@ -1,7 +1,6 @@
 ---
-title: 'Final Exam'
-subtitle: "STAT 353"
-author: "Shuo Han" #change to your name
+title: 'Gun Violence'
+author: "Shuo Han"
 date: ''
 output: 
   html_document:
